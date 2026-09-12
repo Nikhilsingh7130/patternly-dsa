@@ -1,0 +1,8 @@
+name = "patternly-dsa-pages"
+compatibility_date = "2026-09-13"
+pages_build_output_dir = "dist/public"
+
+[[d1_databases]]
+binding = "DSA_DB"
+database_name = "patternly-dsa"
+database_id = "99c87767-7cec-409a-aa75-7f4882e0fd4c"

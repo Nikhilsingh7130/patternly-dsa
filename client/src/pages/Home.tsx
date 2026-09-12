@@ -1,7 +1,4 @@
-import { useMemo, useState } from "react";
-import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
-import { trpc } from "@/lib/trpc";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   BookOpen,
@@ -62,7 +59,6 @@ function difficultyMeta(difficulty: string) {
 }
 
 export default function Home() {
-  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [section, setSection] = useState("all");
   const [pattern, setPattern] = useState("all");
@@ -71,54 +67,55 @@ export default function Home() {
   const [visibleLimit, setVisibleLimit] = useState(24);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [form, setForm] = useState<AddForm>(emptyForm);
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [stats, setStats] = useState({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 });
+  const [filters, setFilters] = useState({ sections: [] as string[], patterns: [] as string[] });
+  const [loading, setLoading] = useState(true);
+  const [mutationPending, setMutationPending] = useState(false);
+  const [addError, setAddError] = useState(false);
 
-  const queryInput = useMemo(() => ({ search, section, pattern, status, difficulty }), [search, section, pattern, status, difficulty]);
-  const questionsQuery = trpc.questions.list.useQuery(queryInput);
-  const statsQuery = trpc.questions.stats.useQuery();
-  const filtersQuery = trpc.questions.filters.useQuery();
-  const utils = trpc.useUtils();
-
-  const refresh = () => {
-    void utils.questions.list.invalidate();
-    void utils.questions.stats.invalidate();
-    void utils.questions.filters.invalidate();
+  const loadCatalog = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/bootstrap");
+      if (!response.ok) throw new Error("Catalog request failed");
+      const data = await response.json();
+      setQuestions(data.questions ?? []);
+      setStats(data.stats ?? stats);
+      setFilters(data.filters ?? filters);
+    } finally {
+      setLoading(false);
+    }
   };
-  const statusMutation = trpc.questions.updateStatus.useMutation({ onSuccess: refresh });
-  const addMutation = trpc.questions.add.useMutation({
-    onSuccess: () => {
-      setForm(emptyForm);
-      setIsAddOpen(false);
-      setVisibleLimit(24);
-      refresh();
-    },
-  });
-  const removeMutation = trpc.questions.remove.useMutation({ onSuccess: refresh });
+  useEffect(() => { void loadCatalog(); }, []);
 
-  const stats = statsQuery.data ?? { total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 };
-  const questions = questionsQuery.data ?? [];
-  const visibleQuestions = questions.slice(0, visibleLimit);
+  const filteredQuestions = useMemo(() => questions.filter((question) => {
+    const needle = search.trim().toLowerCase();
+    const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle));
+    return matchesSearch && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status);
+  }), [questions, search, section, pattern, difficulty, status]);
+  const visibleQuestions = filteredQuestions.slice(0, visibleLimit);
   const completion = stats.total ? Math.round((stats.solved / stats.total) * 100) : 0;
   const activeFilters = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
-  const filters = filtersQuery.data ?? { sections: [], patterns: [] };
 
-  const handleStatusChange = (id: number, current: string) => {
+  const handleStatusChange = async (id: number, current: string) => {
     const next = current === "Not started" ? "In progress" : current === "In progress" ? "Solved" : "Not started";
-    statusMutation.mutate({ id, status: next as "Not started" | "In progress" | "Solved" });
+    setMutationPending(true);
+    try { await fetch(`/api/questions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) }); await loadCatalog(); } finally { setMutationPending(false); }
   };
-
-  const handleAdd = (event: React.FormEvent) => {
+  const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    addMutation.mutate({
-      title: form.title,
-      leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined,
-      section: form.section,
-      pattern: form.pattern,
-      difficulty: form.difficulty,
-      url: form.url,
-      notes: form.notes,
-    });
+    setMutationPending(true); setAddError(false);
+    try {
+      const response = await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined }) });
+      if (!response.ok) throw new Error("Could not add question");
+      setForm(emptyForm); setIsAddOpen(false); setVisibleLimit(24); await loadCatalog();
+    } catch { setAddError(true); } finally { setMutationPending(false); }
   };
-
+  const handleRemove = async (id: number) => {
+    setMutationPending(true);
+    try { await fetch(`/api/questions/${id}`, { method: "DELETE" }); await loadCatalog(); } finally { setMutationPending(false); }
+  };
   const updateForm = (key: keyof AddForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   return (
@@ -156,9 +153,9 @@ export default function Home() {
           <div className="tip-line"><span style={{ width: `${Math.max(8, completion)}%` }} /></div>
         </div>
         <div className="profile-row">
-          <div className="avatar">{user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
-          <div className="profile-copy"><strong>{user?.name || "Guest learner"}</strong><span>{user ? "Synced workspace" : "Local practice view"}</span></div>
-          {!user && <button className="login-link" onClick={() => startLogin()}>Sign in</button>}
+          <div className="avatar">G</div>
+          <div className="profile-copy"><strong>Guest learner</strong><span>Cloudflare workspace</span></div>
+          
         </div>
       </aside>
 
@@ -199,7 +196,7 @@ export default function Home() {
           </section>
 
           <section className="question-section" id="question-bank">
-            <div className="section-heading"><div><p className="panel-kicker">Practice library</p><h2>Question bank <span>{questionsQuery.isLoading ? "…" : questions.length}</span></h2></div><div className="section-heading-note"><span className="green-dot" /> Status updates save automatically</div></div>
+            <div className="section-heading"><div><p className="panel-kicker">Practice library</p><h2>Question bank <span>{loading ? "…" : filteredQuestions.length}</span></h2></div><div className="section-heading-note"><span className="green-dot" /> Status updates save automatically</div></div>
             <div className="filter-toolbar">
               <div className="search-wrap"><Search size={16} /><Input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(24); }} placeholder="Search questions or patterns..." aria-label="Search questions" /></div>
               <Filter size={16} className="toolbar-filter-icon" />
@@ -211,8 +208,8 @@ export default function Home() {
             </div>
 
             <div className="question-list">
-              {questionsQuery.isLoading && <div className="loading-state"><Loader2 className="spin" size={22} /><span>Loading your patterns...</span></div>}
-              {!questionsQuery.isLoading && visibleQuestions.length === 0 && <div className="empty-state"><div className="empty-icon"><Search size={20} /></div><h3>No questions match that view</h3><p>Try clearing a filter or add a custom question to your library.</p><Button variant="outline" onClick={() => setIsAddOpen(true)}><Plus size={15} /> Add question</Button></div>}
+              {loading && <div className="loading-state"><Loader2 className="spin" size={22} /><span>Loading your patterns...</span></div>}
+              {!loading && visibleQuestions.length === 0 && <div className="empty-state"><div className="empty-icon"><Search size={20} /></div><h3>No questions match that view</h3><p>Try clearing a filter or add a custom question to your library.</p><Button variant="outline" onClick={() => setIsAddOpen(true)}><Plus size={15} /> Add question</Button></div>}
               {visibleQuestions.map((question, index) => {
                 const meta = statusMeta(question.status);
                 const StatusIcon = meta.icon;
@@ -220,19 +217,19 @@ export default function Home() {
                   <div className="question-index">{String(question.leetcodeNumber ?? "—").padStart(3, "0")}</div>
                   <div className="question-main"><div className="question-title-line"><h3>{question.title}</h3>{question.url && <a href={question.url} target="_blank" rel="noreferrer" aria-label={`Open ${question.title} on LeetCode`}><ArrowUpRight size={14} /></a>}</div><div className="question-meta"><span>{question.section.replace(/^\w+\.\s*/, "")}</span><span className="meta-separator">/</span><span>{question.pattern.replace(/^Pattern \d+:\s*/, "")}</span>{question.source === "Manual" && <span className="manual-tag">Added by you</span>}</div></div>
                   <span className={`difficulty-pill ${difficultyMeta(question.difficulty)}`}>{question.difficulty}</span>
-                  <button className={`status-button ${meta.className}`} onClick={() => handleStatusChange(question.id, question.status)} disabled={statusMutation.isPending} title="Click to cycle status"><StatusIcon size={14} />{meta.label}</button>
-                  {question.source === "Manual" && <button className="delete-button" onClick={() => removeMutation.mutate({ id: question.id })} disabled={removeMutation.isPending} aria-label={`Delete ${question.title}`}><Trash2 size={15} /></button>}
+                  <button className={`status-button ${meta.className}`} onClick={() => handleStatusChange(question.id, question.status)} disabled={mutationPending} title="Click to cycle status"><StatusIcon size={14} />{meta.label}</button>
+                  {question.source === "Manual" && <button className="delete-button" onClick={() => void handleRemove(question.id)} disabled={mutationPending} aria-label={`Delete ${question.title}`}><Trash2 size={15} /></button>}
                 </article>;
               })}
             </div>
-            {!questionsQuery.isLoading && visibleQuestions.length < questions.length && <button className="load-more" onClick={() => setVisibleLimit((limit) => limit + 24)}>Load 24 more questions <ChevronDown size={15} /></button>}
+            {!loading && visibleQuestions.length < filteredQuestions.length && <button className="load-more" onClick={() => setVisibleLimit((limit) => limit + 24)}>Load 24 more questions <ChevronDown size={15} /></button>}
           </section>
 
           <footer className="page-footer"><span>Patternly · Built for deliberate practice</span><span><a href="https://thita.ai/dsa-patterns-sheet" target="_blank" rel="noreferrer">View original sheet <ArrowUpRight size={13} /></a></span></footer>
         </div>
       </main>
 
-      {isAddOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsAddOpen(false); }}><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><div className="modal-header"><div><p className="panel-kicker">Expand your library</p><h2 id="add-title">Add a question</h2></div><button className="modal-close" onClick={() => setIsAddOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAdd}><div className="form-grid"><label>Question title<Input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="e.g. Longest Increasing Subsequence" /></label><label>LeetCode #<Input type="number" min="1" value={form.leetcodeNumber} onChange={(event) => updateForm("leetcodeNumber", event.target.value)} placeholder="Optional" /></label></div><div className="form-grid"><label>Section<Input required value={form.section} onChange={(event) => updateForm("section", event.target.value)} placeholder="e.g. Dynamic Programming" /></label><label>Pattern<Input required value={form.pattern} onChange={(event) => updateForm("pattern", event.target.value)} placeholder="e.g. 1D DP" /></label></div><div className="form-grid"><label>Difficulty<select value={form.difficulty} onChange={(event) => updateForm("difficulty", event.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Problem URL<Input type="url" value={form.url} onChange={(event) => updateForm("url", event.target.value)} placeholder="https://leetcode.com/problems/..." /></label></div><label>Notes <textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} placeholder="What do you want to remember about this problem?" rows={3} /></label>{addMutation.error && <p className="form-error">Could not add this question. Please check the fields and try again.</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button><Button type="submit" className="add-question-button" disabled={addMutation.isPending}>{addMutation.isPending ? <Loader2 className="spin" size={15} /> : <Plus size={15} />} Add to library</Button></div></form></div></div>}
+      {isAddOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsAddOpen(false); }}><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><div className="modal-header"><div><p className="panel-kicker">Expand your library</p><h2 id="add-title">Add a question</h2></div><button className="modal-close" onClick={() => setIsAddOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAdd}><div className="form-grid"><label>Question title<Input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="e.g. Longest Increasing Subsequence" /></label><label>LeetCode #<Input type="number" min="1" value={form.leetcodeNumber} onChange={(event) => updateForm("leetcodeNumber", event.target.value)} placeholder="Optional" /></label></div><div className="form-grid"><label>Section<Input required value={form.section} onChange={(event) => updateForm("section", event.target.value)} placeholder="e.g. Dynamic Programming" /></label><label>Pattern<Input required value={form.pattern} onChange={(event) => updateForm("pattern", event.target.value)} placeholder="e.g. 1D DP" /></label></div><div className="form-grid"><label>Difficulty<select value={form.difficulty} onChange={(event) => updateForm("difficulty", event.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Problem URL<Input type="url" value={form.url} onChange={(event) => updateForm("url", event.target.value)} placeholder="https://leetcode.com/problems/..." /></label></div><label>Notes <textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} placeholder="What do you want to remember about this problem?" rows={3} /></label>{addError && <p className="form-error">Could not add this question. Please check the fields and try again.</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button><Button type="submit" className="add-question-button" disabled={mutationPending}>{mutationPending ? <Loader2 className="spin" size={15} /> : <Plus size={15} />} Add to library</Button></div></form></div></div>}
     </div>
   );
 }
