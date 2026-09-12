@@ -1,33 +1,238 @@
+import { useMemo, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
+import { trpc } from "@/lib/trpc";
+import {
+  ArrowUpRight,
+  BookOpen,
+  Check,
+  ChevronDown,
+  Circle,
+  Code2,
+  Filter,
+  Flame,
+  LayoutDashboard,
+  ListFilter,
+  Loader2,
+  Plus,
+  Search,
+  Sparkles,
+  Target,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { Streamdown } from 'streamdown';
+import { Input } from "@/components/ui/input";
 
-/**
- * All content in this page are only for example, replace with your own feature implementation
- * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
- */
+const statusOptions = ["all", "Not started", "In progress", "Solved"] as const;
+const difficultyOptions = ["all", "Easy", "Medium", "Hard"] as const;
+type Status = (typeof statusOptions)[number];
+type Difficulty = (typeof difficultyOptions)[number];
+
+type AddForm = {
+  title: string;
+  leetcodeNumber: string;
+  section: string;
+  pattern: string;
+  difficulty: "Easy" | "Medium" | "Hard";
+  url: string;
+  notes: string;
+};
+
+const emptyForm: AddForm = {
+  title: "",
+  leetcodeNumber: "",
+  section: "My additions",
+  pattern: "Custom practice",
+  difficulty: "Medium",
+  url: "",
+  notes: "",
+};
+
+function statusMeta(status: string) {
+  if (status === "Solved") return { label: "Solved", className: "status-solved", icon: Check };
+  if (status === "In progress") return { label: "In progress", className: "status-progress", icon: Flame };
+  return { label: "Not started", className: "status-idle", icon: Circle };
+}
+
+function difficultyMeta(difficulty: string) {
+  if (difficulty === "Easy") return "difficulty-easy";
+  if (difficulty === "Hard") return "difficulty-hard";
+  return "difficulty-medium";
+}
+
 export default function Home() {
-  // The useAuth hook provides authentication state.
-  // To implement login/logout, call logout(), or start login from an event
-  // handler: onClick={() => startLogin()} (imported from "@/const"). Never call
-  // startLogin() during render (no href={startLogin()}) — it mints a one-time
-  // nonce cookie and must run only at the moment of navigation.
-  let { user, loading, error, isAuthenticated, logout } = useAuth();
+  const { user } = useAuth();
+  const [search, setSearch] = useState("");
+  const [section, setSection] = useState("all");
+  const [pattern, setPattern] = useState("all");
+  const [status, setStatus] = useState<Status>("all");
+  const [difficulty, setDifficulty] = useState<Difficulty>("all");
+  const [visibleLimit, setVisibleLimit] = useState(24);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [form, setForm] = useState<AddForm>(emptyForm);
 
-  // If theme is switchable in App.tsx, we can implement theme toggling like this:
-  // const { theme, toggleTheme } = useTheme();
+  const queryInput = useMemo(() => ({ search, section, pattern, status, difficulty }), [search, section, pattern, status, difficulty]);
+  const questionsQuery = trpc.questions.list.useQuery(queryInput);
+  const statsQuery = trpc.questions.stats.useQuery();
+  const filtersQuery = trpc.questions.filters.useQuery();
+  const utils = trpc.useUtils();
+
+  const refresh = () => {
+    void utils.questions.list.invalidate();
+    void utils.questions.stats.invalidate();
+    void utils.questions.filters.invalidate();
+  };
+  const statusMutation = trpc.questions.updateStatus.useMutation({ onSuccess: refresh });
+  const addMutation = trpc.questions.add.useMutation({
+    onSuccess: () => {
+      setForm(emptyForm);
+      setIsAddOpen(false);
+      setVisibleLimit(24);
+      refresh();
+    },
+  });
+  const removeMutation = trpc.questions.remove.useMutation({ onSuccess: refresh });
+
+  const stats = statsQuery.data ?? { total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 };
+  const questions = questionsQuery.data ?? [];
+  const visibleQuestions = questions.slice(0, visibleLimit);
+  const completion = stats.total ? Math.round((stats.solved / stats.total) * 100) : 0;
+  const activeFilters = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
+  const filters = filtersQuery.data ?? { sections: [], patterns: [] };
+
+  const handleStatusChange = (id: number, current: string) => {
+    const next = current === "Not started" ? "In progress" : current === "In progress" ? "Solved" : "Not started";
+    statusMutation.mutate({ id, status: next as "Not started" | "In progress" | "Solved" });
+  };
+
+  const handleAdd = (event: React.FormEvent) => {
+    event.preventDefault();
+    addMutation.mutate({
+      title: form.title,
+      leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined,
+      section: form.section,
+      pattern: form.pattern,
+      difficulty: form.difficulty,
+      url: form.url,
+      notes: form.notes,
+    });
+  };
+
+  const updateForm = (key: keyof AddForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <main>
-        {/* Example: lucide-react for icons */}
-        <Loader2 className="animate-spin" />
-        Example Page
-        {/* Example: Streamdown for markdown rendering */}
-        <Streamdown>Any **markdown** content</Streamdown>
-        <Button variant="default">Example Button</Button>
+    <div className="app-shell min-h-screen">
+      <aside className="sidebar">
+        <div className="brand-block">
+          <div className="brand-mark"><Code2 size={19} strokeWidth={2.6} /></div>
+          <div>
+            <p className="brand-name">pattern<span>ly</span></p>
+            <p className="brand-caption">DSA practice studio</p>
+          </div>
+        </div>
+
+        <div className="side-section-label">Workspace</div>
+        <nav className="side-nav" aria-label="Primary">
+          <a className="side-nav-item active" href="#overview"><LayoutDashboard size={17} /><span>Overview</span></a>
+          <a className="side-nav-item" href="#question-bank"><BookOpen size={17} /><span>Question bank</span><span className="nav-count">{stats.total || "—"}</span></a>
+          <a className="side-nav-item" href="#focus"><Target size={17} /><span>Focus patterns</span></a>
+        </nav>
+
+        <div className="side-section-label">Source</div>
+        <div className="source-card">
+          <div className="source-icon"><Sparkles size={16} /></div>
+          <div>
+            <p>Thita patterns sheet</p>
+            <span>414 questions imported</span>
+          </div>
+          <a href="https://docs.google.com/spreadsheets/d/1EEYzyD_483B-7CmWxsJB_zycdv4Y5dxnzcoEQtaIfuk/edit?gid=329533698#gid=329533698" target="_blank" rel="noreferrer" aria-label="Open source sheet"><ArrowUpRight size={15} /></a>
+        </div>
+
+        <div className="sidebar-spacer" />
+        <div className="tip-card">
+          <p className="tip-label">Small steps compound</p>
+          <p className="tip-copy">Move one question forward today. Your future self will thank you.</p>
+          <div className="tip-line"><span style={{ width: `${Math.max(8, completion)}%` }} /></div>
+        </div>
+        <div className="profile-row">
+          <div className="avatar">{user?.name?.slice(0, 1).toUpperCase() || "G"}</div>
+          <div className="profile-copy"><strong>{user?.name || "Guest learner"}</strong><span>{user ? "Synced workspace" : "Local practice view"}</span></div>
+          {!user && <button className="login-link" onClick={() => startLogin()}>Sign in</button>}
+        </div>
+      </aside>
+
+      <main className="main-content" id="overview">
+        <header className="topbar">
+          <div className="mobile-brand"><div className="brand-mark"><Code2 size={18} /></div><span>patternly</span></div>
+          <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>Overview</strong></div>
+          <div className="topbar-actions"><span className="sync-dot" /><span className="sync-label">Catalog synced</span><button className="icon-button" aria-label="Notifications"><Sparkles size={17} /></button></div>
+        </header>
+
+        <div className="page-wrap">
+          <section className="welcome-row">
+            <div>
+              <p className="eyebrow">SATURDAY, SEPTEMBER 12 <span>•</span> WEEK 04</p>
+              <h1>Build your <em>pattern</em><br className="desktop-break" /> memory.</h1>
+              <p className="hero-copy">A calm, focused space for turning DSA patterns into instinct.</p>
+            </div>
+            <Button className="add-question-button" onClick={() => setIsAddOpen(true)}><Plus size={17} /> Add question</Button>
+          </section>
+
+          <section className="stat-grid" aria-label="Progress overview">
+            <div className="stat-card primary-stat"><div className="stat-card-top"><span className="stat-label">Total questions</span><div className="stat-icon mint"><BookOpen size={16} /></div></div><strong>{stats.total.toLocaleString()}</strong><span className="stat-foot">Across {stats.sections} learning sections</span></div>
+            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">Solved</span><div className="stat-icon peach"><Check size={16} /></div></div><strong>{stats.solved}</strong><span className="stat-foot"><b className="positive">{completion}%</b> of your catalog</span></div>
+            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">In progress</span><div className="stat-icon yellow"><Flame size={16} /></div></div><strong>{stats.inProgress}</strong><span className="stat-foot">Keep the momentum going</span></div>
+            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">Not started</span><div className="stat-icon lilac"><Target size={16} /></div></div><strong>{stats.notStarted}</strong><span className="stat-foot">Ready when you are</span></div>
+          </section>
+
+          <section className="insight-grid" id="focus">
+            <div className="progress-panel panel-card">
+              <div className="panel-heading"><div><p className="panel-kicker">Your momentum</p><h2>Completion arc</h2></div><span className="mini-period">All time <ChevronDown size={13} /></span></div>
+              <div className="arc-layout"><div className="completion-ring" style={{ background: `conic-gradient(#ef7c5f ${completion * 3.6}deg, #e7ebe4 0deg)` }}><div><strong>{completion}%</strong><span>complete</span></div></div><div className="progress-breakdown"><div><span className="legend-dot solved-dot" /><span>Solved</span><strong>{stats.solved}</strong></div><div><span className="legend-dot progress-dot" /><span>In progress</span><strong>{stats.inProgress}</strong></div><div><span className="legend-dot idle-dot" /><span>Not started</span><strong>{stats.notStarted}</strong></div></div></div>
+            </div>
+            <div className="focus-panel panel-card">
+              <div className="panel-heading"><div><p className="panel-kicker">Difficulty mix</p><h2>Know your terrain</h2></div><ListFilter size={17} className="muted-icon" /></div>
+              <div className="difficulty-bars"><div className="bar-row"><div><span>Easy</span><strong>{stats.easy}</strong></div><div className="bar-track"><span className="bar-easy" style={{ width: `${stats.total ? (stats.easy / stats.total) * 100 : 0}%` }} /></div></div><div className="bar-row"><div><span>Medium</span><strong>{stats.medium}</strong></div><div className="bar-track"><span className="bar-medium" style={{ width: `${stats.total ? (stats.medium / stats.total) * 100 : 0}%` }} /></div></div><div className="bar-row"><div><span>Hard</span><strong>{stats.hard}</strong></div><div className="bar-track"><span className="bar-hard" style={{ width: `${stats.total ? (stats.hard / stats.total) * 100 : 0}%` }} /></div></div></div>
+              <p className="focus-note"><Flame size={14} /> A little consistency beats a perfect plan.</p>
+            </div>
+          </section>
+
+          <section className="question-section" id="question-bank">
+            <div className="section-heading"><div><p className="panel-kicker">Practice library</p><h2>Question bank <span>{questionsQuery.isLoading ? "…" : questions.length}</span></h2></div><div className="section-heading-note"><span className="green-dot" /> Status updates save automatically</div></div>
+            <div className="filter-toolbar">
+              <div className="search-wrap"><Search size={16} /><Input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(24); }} placeholder="Search questions or patterns..." aria-label="Search questions" /></div>
+              <Filter size={16} className="toolbar-filter-icon" />
+              <select value={section} onChange={(event) => { setSection(event.target.value); setPattern("all"); setVisibleLimit(24); }} aria-label="Filter by section"><option value="all">All sections</option>{filters.sections.map((item) => <option key={item} value={item}>{item.replace(/^\w+\.\s*/, "")}</option>)}</select>
+              <select value={pattern} onChange={(event) => { setPattern(event.target.value); setVisibleLimit(24); }} aria-label="Filter by pattern"><option value="all">All patterns</option>{filters.patterns.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+              <select value={difficulty} onChange={(event) => { setDifficulty(event.target.value as Difficulty); setVisibleLimit(24); }} aria-label="Filter by difficulty">{difficultyOptions.map((item) => <option key={item} value={item}>{item === "all" ? "Any difficulty" : item}</option>)}</select>
+              <select value={status} onChange={(event) => { setStatus(event.target.value as Status); setVisibleLimit(24); }} aria-label="Filter by status">{statusOptions.map((item) => <option key={item} value={item}>{item === "all" ? "Any status" : item}</option>)}</select>
+              {activeFilters > 0 && <button className="clear-filter" onClick={() => { setSection("all"); setPattern("all"); setDifficulty("all"); setStatus("all"); }}>Clear {activeFilters}<X size={13} /></button>}
+            </div>
+
+            <div className="question-list">
+              {questionsQuery.isLoading && <div className="loading-state"><Loader2 className="spin" size={22} /><span>Loading your patterns...</span></div>}
+              {!questionsQuery.isLoading && visibleQuestions.length === 0 && <div className="empty-state"><div className="empty-icon"><Search size={20} /></div><h3>No questions match that view</h3><p>Try clearing a filter or add a custom question to your library.</p><Button variant="outline" onClick={() => setIsAddOpen(true)}><Plus size={15} /> Add question</Button></div>}
+              {visibleQuestions.map((question, index) => {
+                const meta = statusMeta(question.status);
+                const StatusIcon = meta.icon;
+                return <article className="question-row" key={question.id} style={{ animationDelay: `${Math.min(index, 8) * 25}ms` }}>
+                  <div className="question-index">{String(question.leetcodeNumber ?? "—").padStart(3, "0")}</div>
+                  <div className="question-main"><div className="question-title-line"><h3>{question.title}</h3>{question.url && <a href={question.url} target="_blank" rel="noreferrer" aria-label={`Open ${question.title} on LeetCode`}><ArrowUpRight size={14} /></a>}</div><div className="question-meta"><span>{question.section.replace(/^\w+\.\s*/, "")}</span><span className="meta-separator">/</span><span>{question.pattern.replace(/^Pattern \d+:\s*/, "")}</span>{question.source === "Manual" && <span className="manual-tag">Added by you</span>}</div></div>
+                  <span className={`difficulty-pill ${difficultyMeta(question.difficulty)}`}>{question.difficulty}</span>
+                  <button className={`status-button ${meta.className}`} onClick={() => handleStatusChange(question.id, question.status)} disabled={statusMutation.isPending} title="Click to cycle status"><StatusIcon size={14} />{meta.label}</button>
+                  {question.source === "Manual" && <button className="delete-button" onClick={() => removeMutation.mutate({ id: question.id })} disabled={removeMutation.isPending} aria-label={`Delete ${question.title}`}><Trash2 size={15} /></button>}
+                </article>;
+              })}
+            </div>
+            {!questionsQuery.isLoading && visibleQuestions.length < questions.length && <button className="load-more" onClick={() => setVisibleLimit((limit) => limit + 24)}>Load 24 more questions <ChevronDown size={15} /></button>}
+          </section>
+
+          <footer className="page-footer"><span>Patternly · Built for deliberate practice</span><span><a href="https://thita.ai/dsa-patterns-sheet" target="_blank" rel="noreferrer">View original sheet <ArrowUpRight size={13} /></a></span></footer>
+        </div>
       </main>
+
+      {isAddOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsAddOpen(false); }}><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><div className="modal-header"><div><p className="panel-kicker">Expand your library</p><h2 id="add-title">Add a question</h2></div><button className="modal-close" onClick={() => setIsAddOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAdd}><div className="form-grid"><label>Question title<Input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="e.g. Longest Increasing Subsequence" /></label><label>LeetCode #<Input type="number" min="1" value={form.leetcodeNumber} onChange={(event) => updateForm("leetcodeNumber", event.target.value)} placeholder="Optional" /></label></div><div className="form-grid"><label>Section<Input required value={form.section} onChange={(event) => updateForm("section", event.target.value)} placeholder="e.g. Dynamic Programming" /></label><label>Pattern<Input required value={form.pattern} onChange={(event) => updateForm("pattern", event.target.value)} placeholder="e.g. 1D DP" /></label></div><div className="form-grid"><label>Difficulty<select value={form.difficulty} onChange={(event) => updateForm("difficulty", event.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Problem URL<Input type="url" value={form.url} onChange={(event) => updateForm("url", event.target.value)} placeholder="https://leetcode.com/problems/..." /></label></div><label>Notes <textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} placeholder="What do you want to remember about this problem?" rows={3} /></label>{addMutation.error && <p className="form-error">Could not add this question. Please check the fields and try again.</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button><Button type="submit" className="add-question-button" disabled={addMutation.isPending}>{addMutation.isPending ? <Loader2 className="spin" size={15} /> : <Plus size={15} />} Add to library</Button></div></form></div></div>}
     </div>
   );
 }
