@@ -172,3 +172,24 @@ body.dark-theme .modal-close:hover { background: #29382d; }
 body.dark-theme .loading-state, body.dark-theme .empty-state { color: #91a397; }
 body.dark-theme .empty-state h3 { color: #dbe6de; }
 @media (max-width: 760px) { .account-button { padding: 0 8px; font-size: 0; }.account-button svg { margin: 0; } }
+
+.custom-sheet-card { width: 100%; display: flex; align-items: center; gap: 9px; padding: 10px 11px; margin-top: 7px; color: #7b8b7f; border: 1px solid #e1e8e0; border-radius: 9px; background: #fbfdfb; text-align: left; transition: .18s ease; }
+.custom-sheet-card:hover, .custom-sheet-card.active { color: #d4745b; border-color: #edcfc6; background: #fff8f5; }
+.custom-sheet-card span { min-width: 0; display: grid; gap: 3px; }
+.custom-sheet-card strong { overflow: hidden; color: #526057; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.custom-sheet-card small { color: #a0aca2; font-size: 9px; }
+.upload-sheet-button { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; margin-top: 9px; color: #d4745b; border: 1px dashed #e6bfb4; border-radius: 8px; background: transparent; font-size: 10px; font-weight: 700; }
+.upload-sheet-button:hover { background: #fff5f1; border-color: #d4745b; }
+.upload-modal { width: min(100%, 500px); }
+.upload-help { margin: -8px 0 2px; color: #8c9a8e; font-size: 10px; line-height: 1.6; }
+.file-picker { position: relative; min-height: 75px; place-items: center; padding: 13px; border: 1px dashed #c7d6c9; border-radius: 9px; background: #f7faf7; text-align: center; }
+.file-picker input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.file-picker span { color: #809184; font-size: 11px; font-weight: 600; }
+body.dark-theme .custom-sheet-card { color: #b8c8bb; border-color: #334338; background: #17221b; }
+body.dark-theme .custom-sheet-card:hover, body.dark-theme .custom-sheet-card.active { color: #f0a08d; border-color: #80564a; background: #2a2923; }
+body.dark-theme .custom-sheet-card strong { color: #dbe6de; }
+body.dark-theme .custom-sheet-card small, body.dark-theme .upload-help { color: #91a397; }
+body.dark-theme .upload-sheet-button { color: #f0a08d; border-color: #80564a; }
+body.dark-theme .upload-sheet-button:hover { background: #2a2923; }
+body.dark-theme .file-picker { border-color: #44594a; background: #17221b; }
+body.dark-theme .file-picker span { color: #b8c8bb; }

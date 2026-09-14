@@ -21,6 +21,8 @@ import {
   LogOut,
   Moon,
   Sun,
+  Upload,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,12 +72,19 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("patternly-theme") === "dark");
   const [search, setSearch] = useState("");
+  const [sheetFilter, setSheetFilter] = useState<string | null>(null);
   const [section, setSection] = useState("all");
   const [pattern, setPattern] = useState("all");
   const [status, setStatus] = useState<Status>("all");
   const [difficulty, setDifficulty] = useState<Difficulty>("all");
   const [visibleLimit, setVisibleLimit] = useState(24);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadPending, setUploadPending] = useState(false);
+  const [customSheets, setCustomSheets] = useState<Array<{ id: number; name: string; questionCount: number }>>([]);
   const [form, setForm] = useState<AddForm>(emptyForm);
   const [questions, setQuestions] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 });
@@ -86,10 +95,10 @@ export default function Home() {
   useEffect(() => { document.body.classList.toggle("dark-theme", darkMode); localStorage.setItem("patternly-theme", darkMode ? "dark" : "light"); }, [darkMode]);
   const loadCatalog = async () => {
     setLoading(true);
-    try { const response = await fetch("/api/bootstrap", { credentials: "include" }); if (response.status === 401) { setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); return; } if (!response.ok) throw new Error("Catalog request failed"); const data = await response.json(); setUser(data.user); setQuestions(data.questions ?? []); setStats(data.stats ?? stats); setFilters(data.filters ?? filters); } finally { setLoading(false); }
+    try { const response = await fetch("/api/bootstrap", { credentials: "include" }); if (response.status === 401) { setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); return; } if (!response.ok) throw new Error("Catalog request failed"); const data = await response.json(); setUser(data.user); setQuestions(data.questions ?? []); setCustomSheets(data.customSheets ?? []); setStats(data.stats ?? stats); setFilters(data.filters ?? filters); } finally { setLoading(false); }
   };
   useEffect(() => { void fetch("/api/auth/me", { credentials: "include" }).then((r) => r.json()).then((data) => { setUser(data.user ?? null); if (data.user) void loadCatalog(); else setLoading(false); }); }, []);
-  const filteredQuestions = useMemo(() => questions.filter((question) => { const needle = search.trim().toLowerCase(); const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle)); return matchesSearch && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status); }), [questions, search, section, pattern, difficulty, status]);
+  const filteredQuestions = useMemo(() => questions.filter((question) => { const needle = search.trim().toLowerCase(); const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle)); const matchesSheet = !sheetFilter || question.sheetName === sheetFilter; return matchesSearch && matchesSheet && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status); }), [questions, search, sheetFilter, section, pattern, difficulty, status]);
   const visibleQuestions = filteredQuestions.slice(0, visibleLimit);
   const completion = stats.total ? Math.round((stats.solved / stats.total) * 100) : 0;
   const activeFilters = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
@@ -99,6 +108,7 @@ export default function Home() {
   const handleAuth = async (event: React.FormEvent) => { event.preventDefault(); setAuthError(""); const response = await fetch(`/api/auth/${authMode}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(authForm) }); const data = await response.json(); if (!response.ok) { setAuthError(data.error || "Authentication failed"); return; } setUser(data.user); setAuthOpen(false); setAuthForm({ name: "", email: "", password: "" }); await loadCatalog(); };
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); setUser(null); setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); };
   const updateForm = (key: keyof AddForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const handleUpload = async (event: React.FormEvent) => { event.preventDefault(); if (!uploadFile || !uploadName.trim()) { setUploadError("Choose a CSV file and give it a name."); return; } setUploadPending(true); setUploadError(""); try { const csv = await uploadFile.text(); const response = await fetch("/api/sheets/import", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadName, csv }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Import failed"); setUploadOpen(false); setUploadName(""); setUploadFile(null); await loadCatalog(); } catch (error) { setUploadError(error instanceof Error ? error.message : "Could not import this sheet."); } finally { setUploadPending(false); } };
   return (
     <div className="app-shell min-h-screen">
       <aside className="sidebar">
@@ -120,12 +130,11 @@ export default function Home() {
         <div className="side-section-label">Source</div>
         <div className="source-card">
           <div className="source-icon"><Sparkles size={16} /></div>
-          <div>
-            <p>Thita patterns sheet</p>
-            <span>{user ? "Your progress is private" : "Sign in to save progress"}</span>
-          </div>
+          <div><p>Thita patterns sheet</p><span>{user ? "Shared starter catalog" : "Sign in to save progress"}</span></div>
           <a href="https://docs.google.com/spreadsheets/d/1EEYzyD_483B-7CmWxsJB_zycdv4Y5dxnzcoEQtaIfuk/edit?gid=329533698#gid=329533698" target="_blank" rel="noreferrer" aria-label="Open source sheet"><ArrowUpRight size={15} /></a>
         </div>
+        {customSheets.map((sheet) => <button className={`custom-sheet-card ${sheetFilter === sheet.name ? "active" : ""}`} key={sheet.id} onClick={() => { setSearch(""); setSection("all"); setPattern("all"); setSheetFilter(sheetFilter === sheet.name ? null : sheet.name); }}><FileSpreadsheet size={15} /><span><strong>{sheet.name}</strong><small>{sheet.questionCount} questions · private</small></span></button>)}
+        <button className="upload-sheet-button" onClick={() => user ? setUploadOpen(true) : setAuthOpen(true)}><Upload size={14} /> Upload custom CSV</button>
 
         <div className="sidebar-spacer" />
         <div className="tip-card">
@@ -211,6 +220,7 @@ export default function Home() {
       </main>
 
       {isAddOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsAddOpen(false); }}><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><div className="modal-header"><div><p className="panel-kicker">Expand your library</p><h2 id="add-title">Add a question</h2></div><button className="modal-close" onClick={() => setIsAddOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAdd}><div className="form-grid"><label>Question title<Input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="e.g. Longest Increasing Subsequence" /></label><label>LeetCode #<Input type="number" min="1" value={form.leetcodeNumber} onChange={(event) => updateForm("leetcodeNumber", event.target.value)} placeholder="Optional" /></label></div><div className="form-grid"><label>Section<Input required value={form.section} onChange={(event) => updateForm("section", event.target.value)} placeholder="e.g. Dynamic Programming" /></label><label>Pattern<Input required value={form.pattern} onChange={(event) => updateForm("pattern", event.target.value)} placeholder="e.g. 1D DP" /></label></div><div className="form-grid"><label>Difficulty<select value={form.difficulty} onChange={(event) => updateForm("difficulty", event.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Problem URL<Input type="url" value={form.url} onChange={(event) => updateForm("url", event.target.value)} placeholder="https://leetcode.com/problems/..." /></label></div><label>Notes <textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} placeholder="What do you want to remember about this problem?" rows={3} /></label>{addError && <p className="form-error">Could not add this question. Please check the fields and try again.</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button><Button type="submit" className="add-question-button" disabled={mutationPending}>{mutationPending ? <Loader2 className="spin" size={15} /> : <Plus size={15} />} Add to library</Button></div></form></div></div>}
+      {uploadOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setUploadOpen(false); }}><div className="auth-modal upload-modal" role="dialog" aria-modal="true"><div className="modal-header"><div><p className="panel-kicker">Make it yours</p><h2>Upload a question sheet</h2></div><button className="modal-close" onClick={() => setUploadOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleUpload}><p className="upload-help">Upload a CSV with a <strong>Title</strong> or <strong>Question</strong> column. Optional columns: LeetCode, Section, Pattern, Difficulty, URL, and Notes.</p><label>Sheet name<Input required value={uploadName} onChange={(event) => setUploadName(event.target.value)} placeholder="My interview prep" /></label><label className="file-picker">CSV file<input required type="file" accept=".csv,text/csv" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} /><span>{uploadFile ? uploadFile.name : "Choose a CSV file"}</span></label>{uploadError && <p className="form-error">{uploadError}</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button><Button type="submit" className="add-question-button" disabled={uploadPending}>{uploadPending ? <Loader2 className="spin" size={15} /> : <Upload size={15} />} Import sheet</Button></div></form></div></div>}
       {authOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAuthOpen(false); }}><div className="auth-modal" role="dialog" aria-modal="true"><div className="modal-header"><div><p className="panel-kicker">Your private workspace</p><h2>{authMode === "login" ? "Welcome back" : "Create your account"}</h2></div><button className="modal-close" onClick={() => setAuthOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAuth}>{authMode === "register" && <label>Your name<Input required value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="Alex Johnson" /></label>}<label>Email<Input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label><label>Password<Input required minLength={8} type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 8 characters" /></label>{authError && <p className="form-error">{authError}</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>{authMode === "login" ? "Create account" : "I already have an account"}</Button><Button type="submit" className="add-question-button">{authMode === "login" ? "Sign in" : "Register"}</Button></div></form></div></div>}
     </div>
   );
