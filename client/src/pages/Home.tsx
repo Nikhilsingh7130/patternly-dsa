@@ -98,10 +98,15 @@ export default function Home() {
     try { const response = await fetch("/api/bootstrap", { credentials: "include" }); if (response.status === 401) { setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); return; } if (!response.ok) throw new Error("Catalog request failed"); const data = await response.json(); setUser(data.user); setQuestions(data.questions ?? []); setCustomSheets(data.customSheets ?? []); setStats(data.stats ?? stats); setFilters(data.filters ?? filters); } finally { setLoading(false); }
   };
   useEffect(() => { void fetch("/api/auth/me", { credentials: "include" }).then((r) => r.json()).then((data) => { setUser(data.user ?? null); if (data.user) void loadCatalog(); else setLoading(false); }); }, []);
-  const filteredQuestions = useMemo(() => questions.filter((question) => { const needle = search.trim().toLowerCase(); const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle)); const matchesSheet = !sheetFilter || question.sheetName === sheetFilter; return matchesSearch && matchesSheet && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status); }), [questions, search, sheetFilter, section, pattern, difficulty, status]);
+  const activeQuestions = useMemo(() => questions.filter((question) => sheetFilter ? question.sheetName === sheetFilter : question.source === "Thita patterns sheet"), [questions, sheetFilter]);
+  const activeStats = useMemo(() => ({ total: activeQuestions.length, solved: activeQuestions.filter((q) => q.status === "Solved").length, inProgress: activeQuestions.filter((q) => q.status === "In progress").length, notStarted: activeQuestions.filter((q) => q.status === "Not started").length, easy: activeQuestions.filter((q) => q.difficulty === "Easy").length, medium: activeQuestions.filter((q) => q.difficulty === "Medium").length, hard: activeQuestions.filter((q) => q.difficulty === "Hard").length, sections: new Set(activeQuestions.map((q) => q.section)).size }), [activeQuestions]);
+  const activeFilters = useMemo(() => ({ sections: Array.from(new Set(activeQuestions.map((q) => q.section))), patterns: Array.from(new Set(activeQuestions.map((q) => q.pattern))) }), [activeQuestions]);
+  const filteredQuestions = useMemo(() => activeQuestions.filter((question) => { const needle = search.trim().toLowerCase(); const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle)); return matchesSearch && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status); }), [activeQuestions, search, section, pattern, difficulty, status]);
   const visibleQuestions = filteredQuestions.slice(0, visibleLimit);
-  const completion = stats.total ? Math.round((stats.solved / stats.total) * 100) : 0;
-  const activeFilters = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
+  const completion = activeStats.total ? Math.round((activeStats.solved / activeStats.total) * 100) : 0;
+  const activeFilterCount = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
+  const activeSheetName = sheetFilter ?? "Thita patterns sheet";
+  const selectSheet = (name: string | null) => { setSheetFilter(name); setSearch(""); setSection("all"); setPattern("all"); setDifficulty("all"); setStatus("all"); setVisibleLimit(24); };
   const handleStatusChange = async (id: number, current: string) => { if (!user) { setAuthOpen(true); return; } const next = current === "Not started" ? "In progress" : current === "In progress" ? "Solved" : "Not started"; setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) }); await loadCatalog(); } finally { setMutationPending(false); } };
   const handleAdd = async (event: React.FormEvent) => { event.preventDefault(); if (!user) { setAuthOpen(true); return; } setMutationPending(true); setAddError(false); try { const response = await fetch("/api/questions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined }) }); if (!response.ok) throw new Error("Could not add question"); setForm(emptyForm); setIsAddOpen(false); setVisibleLimit(24); await loadCatalog(); } catch { setAddError(true); } finally { setMutationPending(false); } };
   const handleRemove = async (id: number) => { setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "DELETE", credentials: "include" }); await loadCatalog(); } finally { setMutationPending(false); } };
@@ -123,17 +128,17 @@ export default function Home() {
         <div className="side-section-label">Workspace</div>
         <nav className="side-nav" aria-label="Primary">
           <a className="side-nav-item active" href="#overview"><LayoutDashboard size={17} /><span>Overview</span></a>
-          <a className="side-nav-item" href="#question-bank"><BookOpen size={17} /><span>Question bank</span><span className="nav-count">{stats.total || "—"}</span></a>
+          <a className="side-nav-item" href="#question-bank"><BookOpen size={17} /><span>Question bank</span><span className="nav-count">{activeStats.total || "—"}</span></a>
           <a className="side-nav-item" href="#focus"><Target size={17} /><span>Focus patterns</span></a>
         </nav>
 
         <div className="side-section-label">Source</div>
-        <div className="source-card">
+        <button className={`source-card ${!sheetFilter ? "active" : ""}`} onClick={() => selectSheet(null)}>
           <div className="source-icon"><Sparkles size={16} /></div>
           <div><p>Thita patterns sheet</p><span>{user ? "Shared starter catalog" : "Sign in to save progress"}</span></div>
           <a href="https://docs.google.com/spreadsheets/d/1EEYzyD_483B-7CmWxsJB_zycdv4Y5dxnzcoEQtaIfuk/edit?gid=329533698#gid=329533698" target="_blank" rel="noreferrer" aria-label="Open source sheet"><ArrowUpRight size={15} /></a>
-        </div>
-        {customSheets.map((sheet) => <button className={`custom-sheet-card ${sheetFilter === sheet.name ? "active" : ""}`} key={sheet.id} onClick={() => { setSearch(""); setSection("all"); setPattern("all"); setSheetFilter(sheetFilter === sheet.name ? null : sheet.name); }}><FileSpreadsheet size={15} /><span><strong>{sheet.name}</strong><small>{sheet.questionCount} questions · private</small></span></button>)}
+        </button>
+        {customSheets.map((sheet) => <button className={`custom-sheet-card ${sheetFilter === sheet.name ? "active" : ""}`} key={sheet.id} onClick={() => selectSheet(sheet.name)}><FileSpreadsheet size={15} /><span><strong>{sheet.name}</strong><small>{sheet.questionCount} questions · private</small></span></button>)}
         <button className="upload-sheet-button" onClick={() => user ? setUploadOpen(true) : setAuthOpen(true)}><Upload size={14} /> Upload custom CSV</button>
 
         <div className="sidebar-spacer" />
@@ -167,34 +172,34 @@ export default function Home() {
           </section>
 
           <section className="stat-grid" aria-label="Progress overview">
-            <div className="stat-card primary-stat"><div className="stat-card-top"><span className="stat-label">Total questions</span><div className="stat-icon mint"><BookOpen size={16} /></div></div><strong>{stats.total.toLocaleString()}</strong><span className="stat-foot">Across {stats.sections} learning sections</span></div>
-            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">Solved</span><div className="stat-icon peach"><Check size={16} /></div></div><strong>{stats.solved}</strong><span className="stat-foot"><b className="positive">{completion}%</b> of your catalog</span></div>
-            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">In progress</span><div className="stat-icon yellow"><Flame size={16} /></div></div><strong>{stats.inProgress}</strong><span className="stat-foot">Keep the momentum going</span></div>
-            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">Not started</span><div className="stat-icon lilac"><Target size={16} /></div></div><strong>{stats.notStarted}</strong><span className="stat-foot">Ready when you are</span></div>
+            <div className="stat-card primary-stat"><div className="stat-card-top"><span className="stat-label">Total questions</span><div className="stat-icon mint"><BookOpen size={16} /></div></div><strong>{activeStats.total.toLocaleString()}</strong><span className="stat-foot">Across {activeStats.sections} learning sections</span></div>
+            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">Solved</span><div className="stat-icon peach"><Check size={16} /></div></div><strong>{activeStats.solved}</strong><span className="stat-foot"><b className="positive">{completion}%</b> of this sheet</span></div>
+            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">In progress</span><div className="stat-icon yellow"><Flame size={16} /></div></div><strong>{activeStats.inProgress}</strong><span className="stat-foot">Keep the momentum going</span></div>
+            <div className="stat-card"><div className="stat-card-top"><span className="stat-label">Not started</span><div className="stat-icon lilac"><Target size={16} /></div></div><strong>{activeStats.notStarted}</strong><span className="stat-foot">Ready when you are</span></div>
           </section>
 
           <section className="insight-grid" id="focus">
             <div className="progress-panel panel-card">
               <div className="panel-heading"><div><p className="panel-kicker">Your momentum</p><h2>Completion arc</h2></div><span className="mini-period">All time <ChevronDown size={13} /></span></div>
-              <div className="arc-layout"><div className="completion-ring" style={{ background: `conic-gradient(#ef7c5f ${completion * 3.6}deg, #e7ebe4 0deg)` }}><div><strong>{completion}%</strong><span>complete</span></div></div><div className="progress-breakdown"><div><span className="legend-dot solved-dot" /><span>Solved</span><strong>{stats.solved}</strong></div><div><span className="legend-dot progress-dot" /><span>In progress</span><strong>{stats.inProgress}</strong></div><div><span className="legend-dot idle-dot" /><span>Not started</span><strong>{stats.notStarted}</strong></div></div></div>
+              <div className="arc-layout"><div className="completion-ring" style={{ background: `conic-gradient(#ef7c5f ${completion * 3.6}deg, #e7ebe4 0deg)` }}><div><strong>{completion}%</strong><span>complete</span></div></div><div className="progress-breakdown"><div><span className="legend-dot solved-dot" /><span>Solved</span><strong>{activeStats.solved}</strong></div><div><span className="legend-dot progress-dot" /><span>In progress</span><strong>{activeStats.inProgress}</strong></div><div><span className="legend-dot idle-dot" /><span>Not started</span><strong>{activeStats.notStarted}</strong></div></div></div>
             </div>
             <div className="focus-panel panel-card">
               <div className="panel-heading"><div><p className="panel-kicker">Difficulty mix</p><h2>Know your terrain</h2></div><ListFilter size={17} className="muted-icon" /></div>
-              <div className="difficulty-bars"><div className="bar-row"><div><span>Easy</span><strong>{stats.easy}</strong></div><div className="bar-track"><span className="bar-easy" style={{ width: `${stats.total ? (stats.easy / stats.total) * 100 : 0}%` }} /></div></div><div className="bar-row"><div><span>Medium</span><strong>{stats.medium}</strong></div><div className="bar-track"><span className="bar-medium" style={{ width: `${stats.total ? (stats.medium / stats.total) * 100 : 0}%` }} /></div></div><div className="bar-row"><div><span>Hard</span><strong>{stats.hard}</strong></div><div className="bar-track"><span className="bar-hard" style={{ width: `${stats.total ? (stats.hard / stats.total) * 100 : 0}%` }} /></div></div></div>
+              <div className="difficulty-bars"><div className="bar-row"><div><span>Easy</span><strong>{activeStats.easy}</strong></div><div className="bar-track"><span className="bar-easy" style={{ width: `${activeStats.total ? (activeStats.easy / activeStats.total) * 100 : 0}%` }} /></div></div><div className="bar-row"><div><span>Medium</span><strong>{activeStats.medium}</strong></div><div className="bar-track"><span className="bar-medium" style={{ width: `${activeStats.total ? (activeStats.medium / activeStats.total) * 100 : 0}%` }} /></div></div><div className="bar-row"><div><span>Hard</span><strong>{activeStats.hard}</strong></div><div className="bar-track"><span className="bar-hard" style={{ width: `${activeStats.total ? (activeStats.hard / activeStats.total) * 100 : 0}%` }} /></div></div></div>
               <p className="focus-note"><Flame size={14} /> A little consistency beats a perfect plan.</p>
             </div>
           </section>
 
           <section className="question-section" id="question-bank">
-            <div className="section-heading"><div><p className="panel-kicker">Practice library</p><h2>Question bank <span>{loading ? "…" : filteredQuestions.length}</span></h2></div><div className="section-heading-note"><span className="green-dot" /> Status updates save automatically</div></div>
+            <div className="section-heading"><div><p className="panel-kicker">Active sheet</p><h2>{activeSheetName} <span>{loading ? "…" : filteredQuestions.length}</span></h2></div><div className="section-heading-note"><span className="green-dot" /> Only this sheet is shown</div></div>
             <div className="filter-toolbar">
               <div className="search-wrap"><Search size={16} /><Input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(24); }} placeholder="Search questions or patterns..." aria-label="Search questions" /></div>
               <Filter size={16} className="toolbar-filter-icon" />
-              <select value={section} onChange={(event) => { setSection(event.target.value); setPattern("all"); setVisibleLimit(24); }} aria-label="Filter by section"><option value="all">All sections</option>{filters.sections.map((item) => <option key={item} value={item}>{item.replace(/^\w+\.\s*/, "")}</option>)}</select>
-              <select value={pattern} onChange={(event) => { setPattern(event.target.value); setVisibleLimit(24); }} aria-label="Filter by pattern"><option value="all">All patterns</option>{filters.patterns.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+              <select value={section} onChange={(event) => { setSection(event.target.value); setPattern("all"); setVisibleLimit(24); }} aria-label="Filter by section"><option value="all">All sections</option>{activeFilters.sections.map((item) => <option key={item} value={item}>{item.replace(/^\w+\.\s*/, "")}</option>)}</select>
+              <select value={pattern} onChange={(event) => { setPattern(event.target.value); setVisibleLimit(24); }} aria-label="Filter by pattern"><option value="all">All patterns</option>{activeFilters.patterns.map((item) => <option key={item} value={item}>{item}</option>)}</select>
               <select value={difficulty} onChange={(event) => { setDifficulty(event.target.value as Difficulty); setVisibleLimit(24); }} aria-label="Filter by difficulty">{difficultyOptions.map((item) => <option key={item} value={item}>{item === "all" ? "Any difficulty" : item}</option>)}</select>
               <select value={status} onChange={(event) => { setStatus(event.target.value as Status); setVisibleLimit(24); }} aria-label="Filter by status">{statusOptions.map((item) => <option key={item} value={item}>{item === "all" ? "Any status" : item}</option>)}</select>
-              {activeFilters > 0 && <button className="clear-filter" onClick={() => { setSection("all"); setPattern("all"); setDifficulty("all"); setStatus("all"); }}>Clear {activeFilters}<X size={13} /></button>}
+              {activeFilterCount > 0 && <button className="clear-filter" onClick={() => { setSection("all"); setPattern("all"); setDifficulty("all"); setStatus("all"); }}>Clear {activeFilterCount}<X size={13} /></button>}
             </div>
 
             <div className="question-list">
