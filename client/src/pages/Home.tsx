@@ -17,6 +17,10 @@ import {
   Target,
   Trash2,
   X,
+  LogIn,
+  LogOut,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +63,12 @@ function difficultyMeta(difficulty: string) {
 }
 
 export default function Home() {
+  const [user, setUser] = useState<{ id: number; name: string; email: string } | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
+  const [authError, setAuthError] = useState("");
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("patternly-theme") === "dark");
   const [search, setSearch] = useState("");
   const [section, setSection] = useState("all");
   const [pattern, setPattern] = useState("all");
@@ -73,51 +83,22 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [mutationPending, setMutationPending] = useState(false);
   const [addError, setAddError] = useState(false);
-
+  useEffect(() => { document.body.classList.toggle("dark-theme", darkMode); localStorage.setItem("patternly-theme", darkMode ? "dark" : "light"); }, [darkMode]);
   const loadCatalog = async () => {
     setLoading(true);
-    try {
-      const response = await fetch("/api/bootstrap");
-      if (!response.ok) throw new Error("Catalog request failed");
-      const data = await response.json();
-      setQuestions(data.questions ?? []);
-      setStats(data.stats ?? stats);
-      setFilters(data.filters ?? filters);
-    } finally {
-      setLoading(false);
-    }
+    try { const response = await fetch("/api/bootstrap", { credentials: "include" }); if (response.status === 401) { setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); return; } if (!response.ok) throw new Error("Catalog request failed"); const data = await response.json(); setUser(data.user); setQuestions(data.questions ?? []); setStats(data.stats ?? stats); setFilters(data.filters ?? filters); } finally { setLoading(false); }
   };
-  useEffect(() => { void loadCatalog(); }, []);
-
-  const filteredQuestions = useMemo(() => questions.filter((question) => {
-    const needle = search.trim().toLowerCase();
-    const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle));
-    return matchesSearch && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status);
-  }), [questions, search, section, pattern, difficulty, status]);
+  useEffect(() => { void fetch("/api/auth/me", { credentials: "include" }).then((r) => r.json()).then((data) => { setUser(data.user ?? null); if (data.user) void loadCatalog(); else setLoading(false); }); }, []);
+  const filteredQuestions = useMemo(() => questions.filter((question) => { const needle = search.trim().toLowerCase(); const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle)); return matchesSearch && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status); }), [questions, search, section, pattern, difficulty, status]);
   const visibleQuestions = filteredQuestions.slice(0, visibleLimit);
   const completion = stats.total ? Math.round((stats.solved / stats.total) * 100) : 0;
   const activeFilters = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
-
-  const handleStatusChange = async (id: number, current: string) => {
-    const next = current === "Not started" ? "In progress" : current === "In progress" ? "Solved" : "Not started";
-    setMutationPending(true);
-    try { await fetch(`/api/questions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) }); await loadCatalog(); } finally { setMutationPending(false); }
-  };
-  const handleAdd = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setMutationPending(true); setAddError(false);
-    try {
-      const response = await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined }) });
-      if (!response.ok) throw new Error("Could not add question");
-      setForm(emptyForm); setIsAddOpen(false); setVisibleLimit(24); await loadCatalog();
-    } catch { setAddError(true); } finally { setMutationPending(false); }
-  };
-  const handleRemove = async (id: number) => {
-    setMutationPending(true);
-    try { await fetch(`/api/questions/${id}`, { method: "DELETE" }); await loadCatalog(); } finally { setMutationPending(false); }
-  };
+  const handleStatusChange = async (id: number, current: string) => { if (!user) { setAuthOpen(true); return; } const next = current === "Not started" ? "In progress" : current === "In progress" ? "Solved" : "Not started"; setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) }); await loadCatalog(); } finally { setMutationPending(false); } };
+  const handleAdd = async (event: React.FormEvent) => { event.preventDefault(); if (!user) { setAuthOpen(true); return; } setMutationPending(true); setAddError(false); try { const response = await fetch("/api/questions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined }) }); if (!response.ok) throw new Error("Could not add question"); setForm(emptyForm); setIsAddOpen(false); setVisibleLimit(24); await loadCatalog(); } catch { setAddError(true); } finally { setMutationPending(false); } };
+  const handleRemove = async (id: number) => { setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "DELETE", credentials: "include" }); await loadCatalog(); } finally { setMutationPending(false); } };
+  const handleAuth = async (event: React.FormEvent) => { event.preventDefault(); setAuthError(""); const response = await fetch(`/api/auth/${authMode}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(authForm) }); const data = await response.json(); if (!response.ok) { setAuthError(data.error || "Authentication failed"); return; } setUser(data.user); setAuthOpen(false); setAuthForm({ name: "", email: "", password: "" }); await loadCatalog(); };
+  const logout = async () => { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); setUser(null); setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); };
   const updateForm = (key: keyof AddForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
-
   return (
     <div className="app-shell min-h-screen">
       <aside className="sidebar">
@@ -141,7 +122,7 @@ export default function Home() {
           <div className="source-icon"><Sparkles size={16} /></div>
           <div>
             <p>Thita patterns sheet</p>
-            <span>414 questions imported</span>
+            <span>{user ? "Your progress is private" : "Sign in to save progress"}</span>
           </div>
           <a href="https://docs.google.com/spreadsheets/d/1EEYzyD_483B-7CmWxsJB_zycdv4Y5dxnzcoEQtaIfuk/edit?gid=329533698#gid=329533698" target="_blank" rel="noreferrer" aria-label="Open source sheet"><ArrowUpRight size={15} /></a>
         </div>
@@ -163,7 +144,7 @@ export default function Home() {
         <header className="topbar">
           <div className="mobile-brand"><div className="brand-mark"><Code2 size={18} /></div><span>patternly</span></div>
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-slash">/</span><strong>Overview</strong></div>
-          <div className="topbar-actions"><span className="sync-dot" /><span className="sync-label">Catalog synced</span><button className="icon-button" aria-label="Notifications"><Sparkles size={17} /></button></div>
+          <div className="topbar-actions"><span className="sync-dot" /><span className="sync-label">{user ? `Signed in as ${user.name}` : "Private practice mode"}</span><button className="icon-button" onClick={() => setDarkMode((value) => !value)} aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</button>{user ? <button className="account-button" onClick={() => void logout()}><LogOut size={14} /> Sign out</button> : <button className="account-button" onClick={() => setAuthOpen(true)}><LogIn size={14} /> Sign in</button>}</div>
         </header>
 
         <div className="page-wrap">
@@ -173,7 +154,7 @@ export default function Home() {
               <h1>Build your <em>pattern</em><br className="desktop-break" /> memory.</h1>
               <p className="hero-copy">A calm, focused space for turning DSA patterns into instinct.</p>
             </div>
-            <Button className="add-question-button" onClick={() => setIsAddOpen(true)}><Plus size={17} /> Add question</Button>
+            <Button className="add-question-button" onClick={() => user ? setIsAddOpen(true) : setAuthOpen(true)}><Plus size={17} /> Add question</Button>
           </section>
 
           <section className="stat-grid" aria-label="Progress overview">
@@ -230,6 +211,7 @@ export default function Home() {
       </main>
 
       {isAddOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsAddOpen(false); }}><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><div className="modal-header"><div><p className="panel-kicker">Expand your library</p><h2 id="add-title">Add a question</h2></div><button className="modal-close" onClick={() => setIsAddOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAdd}><div className="form-grid"><label>Question title<Input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="e.g. Longest Increasing Subsequence" /></label><label>LeetCode #<Input type="number" min="1" value={form.leetcodeNumber} onChange={(event) => updateForm("leetcodeNumber", event.target.value)} placeholder="Optional" /></label></div><div className="form-grid"><label>Section<Input required value={form.section} onChange={(event) => updateForm("section", event.target.value)} placeholder="e.g. Dynamic Programming" /></label><label>Pattern<Input required value={form.pattern} onChange={(event) => updateForm("pattern", event.target.value)} placeholder="e.g. 1D DP" /></label></div><div className="form-grid"><label>Difficulty<select value={form.difficulty} onChange={(event) => updateForm("difficulty", event.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Problem URL<Input type="url" value={form.url} onChange={(event) => updateForm("url", event.target.value)} placeholder="https://leetcode.com/problems/..." /></label></div><label>Notes <textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} placeholder="What do you want to remember about this problem?" rows={3} /></label>{addError && <p className="form-error">Could not add this question. Please check the fields and try again.</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button><Button type="submit" className="add-question-button" disabled={mutationPending}>{mutationPending ? <Loader2 className="spin" size={15} /> : <Plus size={15} />} Add to library</Button></div></form></div></div>}
+      {authOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAuthOpen(false); }}><div className="auth-modal" role="dialog" aria-modal="true"><div className="modal-header"><div><p className="panel-kicker">Your private workspace</p><h2>{authMode === "login" ? "Welcome back" : "Create your account"}</h2></div><button className="modal-close" onClick={() => setAuthOpen(false)} aria-label="Close"><X size={18} /></button></div><form onSubmit={handleAuth}>{authMode === "register" && <label>Your name<Input required value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="Alex Johnson" /></label>}<label>Email<Input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label><label>Password<Input required minLength={8} type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 8 characters" /></label>{authError && <p className="form-error">{authError}</p>}<div className="modal-actions"><Button type="button" variant="outline" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>{authMode === "login" ? "Create account" : "I already have an account"}</Button><Button type="submit" className="add-question-button">{authMode === "login" ? "Sign in" : "Register"}</Button></div></form></div></div>}
     </div>
   );
 }

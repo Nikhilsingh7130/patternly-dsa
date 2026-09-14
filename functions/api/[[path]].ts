@@ -1,81 +1,60 @@
 import { seedQuestions } from "../../shared/seedQuestions";
 
 type Env = { DSA_DB: D1Database };
+type User = { id: number; name: string; email: string };
+type Question = { id: number; title: string; leetcodeNumber: number | null; section: string; pattern: string; difficulty: "Easy" | "Medium" | "Hard"; status: "Not started" | "In progress" | "Solved"; url: string | null; notes: string | null; source: string };
+const baseHeaders = { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+const json = (body: unknown, status = 200, request?: Request) => { const headers = new Headers(baseHeaders); headers.set("Access-Control-Allow-Origin", request?.headers.get("Origin") || "*"); headers.set("Access-Control-Allow-Credentials", "true"); return new Response(JSON.stringify(body), { status, headers }); };
 
-type Question = {
-  id: number;
-  title: string;
-  leetcodeNumber: number | null;
-  section: string;
-  pattern: string;
-  difficulty: "Easy" | "Medium" | "Hard";
-  status: "Not started" | "In progress" | "Solved";
-  url: string | null;
-  notes: string | null;
-  source: string;
-};
-
-const headers = { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers });
+async function digest(value: string) { const bytes = new TextEncoder().encode(value); const hash = await crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join(""); }
+async function passwordHash(password: string, salt: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]); const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 100000, hash: "SHA-256" }, key, 256); return Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, "0")).join(""); }
+function cookieOptions(token: string, maxAge = 60 * 60 * 24 * 30) { return `patternly_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`; }
+function readCookie(request: Request, name: string) { return request.headers.get("Cookie")?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1); }
 
 async function ensureDatabase(db: D1Database) {
-  await db.prepare(`CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, leetcodeNumber INTEGER, section TEXT NOT NULL, pattern TEXT NOT NULL, difficulty TEXT NOT NULL DEFAULT 'Medium', status TEXT NOT NULL DEFAULT 'Not started', url TEXT, notes TEXT, source TEXT NOT NULL DEFAULT 'Manual', createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+  await db.batch([
+    db.prepare("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, passwordHash TEXT NOT NULL, salt TEXT NOT NULL, createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS sessions (tokenHash TEXT PRIMARY KEY, userId INTEGER NOT NULL, expiresAt TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS user_progress (userId INTEGER NOT NULL, questionId INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'Not started', PRIMARY KEY (userId, questionId))"),
+    db.prepare("CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, leetcodeNumber INTEGER, section TEXT NOT NULL, pattern TEXT NOT NULL, difficulty TEXT NOT NULL DEFAULT 'Medium', status TEXT NOT NULL DEFAULT 'Not started', url TEXT, notes TEXT, source TEXT NOT NULL DEFAULT 'Manual', createdBy INTEGER, createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+  ]);
+  try { await db.prepare("ALTER TABLE questions ADD COLUMN createdBy INTEGER").run(); } catch { /* existing databases already have the column */ }
   const row = await db.prepare("SELECT COUNT(*) AS total FROM questions").first<{ total: number }>();
-  if (Number(row?.total ?? 0) > 0) return;
-  for (let index = 0; index < seedQuestions.length; index += 50) {
-    const batch = seedQuestions.slice(index, index + 50).map((item) => db.prepare("INSERT INTO questions (title, leetcodeNumber, section, pattern, difficulty, status, url, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(item.title, item.leetcodeNumber, item.section, item.pattern, item.difficulty, "Not started", `https://leetcode.com/problems/${item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}/`, "Thita patterns sheet"));
-    await db.batch(batch);
+  if (Number(row?.total ?? 0) === 0) for (let index = 0; index < seedQuestions.length; index += 50) {
+    await db.batch(seedQuestions.slice(index, index + 50).map((item) => db.prepare("INSERT INTO questions (title, leetcodeNumber, section, pattern, difficulty, status, url, source) VALUES (?, ?, ?, ?, ?, 'Not started', ?, ?)").bind(item.title, item.leetcodeNumber, item.section, item.pattern, item.difficulty, `https://leetcode.com/problems/${item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}/`, "Thita patterns sheet")));
   }
 }
-
-async function getQuestions(db: D1Database) {
-  const result = await db.prepare("SELECT id, title, leetcodeNumber, section, pattern, difficulty, status, url, notes, source FROM questions ORDER BY section, pattern, leetcodeNumber, id").all<Question>();
-  return result.results ?? [];
-}
-
-function summarize(questions: Question[]) {
-  return {
-    total: questions.length,
-    solved: questions.filter((q) => q.status === "Solved").length,
-    inProgress: questions.filter((q) => q.status === "In progress").length,
-    notStarted: questions.filter((q) => q.status === "Not started").length,
-    easy: questions.filter((q) => q.difficulty === "Easy").length,
-    medium: questions.filter((q) => q.difficulty === "Medium").length,
-    hard: questions.filter((q) => q.difficulty === "Hard").length,
-    sections: new Set(questions.map((q) => q.section)).size,
-  };
-}
+async function currentUser(db: D1Database, request: Request): Promise<User | null> { const token = readCookie(request, "patternly_session"); if (!token) return null; const row = await db.prepare("SELECT users.id, users.name, users.email FROM sessions JOIN users ON users.id = sessions.userId WHERE sessions.tokenHash = ? AND sessions.expiresAt > CURRENT_TIMESTAMP").bind(await digest(token)).first<User>(); return row ?? null; }
+async function getQuestions(db: D1Database, userId: number | null) { const result = await db.prepare("SELECT q.id, q.title, q.leetcodeNumber, q.section, q.pattern, q.difficulty, COALESCE(p.status, q.status) AS status, q.url, q.notes, q.source FROM questions q LEFT JOIN user_progress p ON p.questionId = q.id AND p.userId = ? WHERE q.source != 'Manual' OR q.source = 'Manual' AND q.createdBy = ? ORDER BY q.section, q.pattern, q.leetcodeNumber, q.id").bind(userId ?? -1, userId ?? -1).all<Question>(); return result.results ?? []; }
+function summarize(questions: Question[]) { return { total: questions.length, solved: questions.filter((q) => q.status === "Solved").length, inProgress: questions.filter((q) => q.status === "In progress").length, notStarted: questions.filter((q) => q.status === "Not started").length, easy: questions.filter((q) => q.difficulty === "Easy").length, medium: questions.filter((q) => q.difficulty === "Medium").length, hard: questions.filter((q) => q.difficulty === "Hard").length, sections: new Set(questions.map((q) => q.section)).size }; }
+async function requireUser(db: D1Database, request: Request) { return currentUser(db, request); }
 
 export const onRequest: PagesFunction<Env> = async ({ request, env, params }) => {
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
-  if (!env.DSA_DB) return json({ error: "DSA_DB binding is not configured" }, 500);
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...baseHeaders, "Access-Control-Allow-Origin": request.headers.get("Origin") || "*", "Access-Control-Allow-Credentials": "true" } });
+  if (!env.DSA_DB) return json({ error: "DSA_DB binding is not configured" }, 500, request);
   await ensureDatabase(env.DSA_DB);
   const path = Array.isArray(params.path) ? params.path.join("/") : String(params.path ?? "");
   try {
-    if (request.method === "GET" && path === "bootstrap") {
-      const questions = await getQuestions(env.DSA_DB);
-      return json({ questions, stats: summarize(questions), filters: { sections: Array.from(new Set(questions.map((q) => q.section))), patterns: Array.from(new Set(questions.map((q) => q.pattern))) } });
+    if (request.method === "POST" && path === "auth/register") {
+      const body = await request.json() as { name?: string; email?: string; password?: string }; const email = body.email?.trim().toLowerCase();
+      if (!body.name?.trim() || !email || !body.password || body.password.length < 8) return json({ error: "Name, valid email, and an 8+ character password are required" }, 400, request);
+      const salt = crypto.randomUUID(); const hash = await passwordHash(body.password, salt); const result = await env.DSA_DB.prepare("INSERT INTO users (name, email, passwordHash, salt) VALUES (?, ?, ?, ?)").bind(body.name.trim(), email, hash, salt).run();
+      const token = crypto.randomUUID(); await env.DSA_DB.prepare("INSERT INTO sessions (tokenHash, userId, expiresAt) VALUES (?, ?, datetime('now', '+30 days'))").bind(await digest(token), result.meta.last_row_id).run();
+      const response = json({ user: { id: result.meta.last_row_id, name: body.name.trim(), email } }, 201, request); response.headers.set("Set-Cookie", cookieOptions(token)); return response;
     }
-    if (request.method === "POST" && path === "questions") {
-      const body = await request.json() as Partial<Question>;
-      if (!body.title || !body.section || !body.pattern || !["Easy", "Medium", "Hard"].includes(String(body.difficulty))) return json({ error: "title, section, pattern, and valid difficulty are required" }, 400);
-      const result = await env.DSA_DB.prepare("INSERT INTO questions (title, leetcodeNumber, section, pattern, difficulty, status, url, notes, source) VALUES (?, ?, ?, ?, ?, 'Not started', ?, ?, 'Manual')").bind(body.title, body.leetcodeNumber ?? null, body.section, body.pattern, body.difficulty, body.url || null, body.notes || null).run();
-      return json({ id: result.meta.last_row_id }, 201);
+    if (request.method === "POST" && path === "auth/login") {
+      const body = await request.json() as { email?: string; password?: string }; const row = await env.DSA_DB.prepare("SELECT * FROM users WHERE email = ?").bind(body.email?.trim().toLowerCase()).first<{ id: number; name: string; email: string; passwordHash: string; salt: string }>();
+      if (!row || !body.password || await passwordHash(body.password, row.salt) !== row.passwordHash) return json({ error: "Invalid email or password" }, 401, request);
+      const token = crypto.randomUUID(); await env.DSA_DB.prepare("INSERT INTO sessions (tokenHash, userId, expiresAt) VALUES (?, ?, datetime('now', '+30 days'))").bind(await digest(token), row.id).run(); const response = json({ user: { id: row.id, name: row.name, email: row.email } }, 200, request); response.headers.set("Set-Cookie", cookieOptions(token)); return response;
     }
-    const match = path.match(/^questions\/(\d+)$/);
-    if (match && request.method === "PATCH") {
-      const body = await request.json() as { status?: string };
-      if (!["Not started", "In progress", "Solved"].includes(String(body.status))) return json({ error: "Invalid status" }, 400);
-      await env.DSA_DB.prepare("UPDATE questions SET status = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?").bind(body.status, Number(match[1])).run();
-      return json({ success: true });
-    }
-    if (match && request.method === "DELETE") {
-      await env.DSA_DB.prepare("DELETE FROM questions WHERE id = ? AND source = 'Manual'").bind(Number(match[1])).run();
-      return json({ success: true });
-    }
-    return json({ error: "Not found" }, 404);
-  } catch (error) {
-    console.error(error);
-    return json({ error: "Internal API error" }, 500);
-  }
+    if (request.method === "POST" && path === "auth/logout") { const token = readCookie(request, "patternly_session"); if (token) await env.DSA_DB.prepare("DELETE FROM sessions WHERE tokenHash = ?").bind(await digest(token)).run(); const response = json({ success: true }, 200, request); response.headers.set("Set-Cookie", cookieOptions("", 0)); return response; }
+    if (request.method === "GET" && path === "auth/me") return json({ user: await currentUser(env.DSA_DB, request) }, 200, request);
+    const user = await requireUser(env.DSA_DB, request);
+    if (request.method === "GET" && path === "bootstrap") { const questions = await getQuestions(env.DSA_DB, user?.id ?? null); return json({ user, questions, stats: summarize(questions), filters: { sections: Array.from(new Set(questions.map((q) => q.section))), patterns: Array.from(new Set(questions.map((q) => q.pattern))) } }, 200, request); }
+    if (!user) return json({ error: "Sign in required" }, 401, request);
+    if (request.method === "POST" && path === "questions") { const body = await request.json() as Partial<Question>; if (!body.title || !body.section || !body.pattern || !["Easy", "Medium", "Hard"].includes(String(body.difficulty))) return json({ error: "title, section, pattern, and valid difficulty are required" }, 400, request); const result = await env.DSA_DB.prepare("INSERT INTO questions (title, leetcodeNumber, section, pattern, difficulty, status, url, notes, source, createdBy) VALUES (?, ?, ?, ?, ?, 'Not started', ?, ?, 'Manual', ?)").bind(body.title, body.leetcodeNumber ?? null, body.section, body.pattern, body.difficulty, body.url || null, body.notes || null, user.id).run(); return json({ id: result.meta.last_row_id }, 201, request); }
+    const match = path.match(/^questions\/(\d+)$/); if (match && request.method === "PATCH") { const body = await request.json() as { status?: string }; if (!["Not started", "In progress", "Solved"].includes(String(body.status))) return json({ error: "Invalid status" }, 400, request); await env.DSA_DB.prepare("INSERT INTO user_progress (userId, questionId, status) VALUES (?, ?, ?) ON CONFLICT(userId, questionId) DO UPDATE SET status = excluded.status").bind(user.id, Number(match[1]), body.status).run(); return json({ success: true }, 200, request); }
+    if (match && request.method === "DELETE") { await env.DSA_DB.prepare("DELETE FROM questions WHERE id = ? AND source = 'Manual' AND createdBy = ?").bind(Number(match[1]), user.id).run(); return json({ success: true }, 200, request); }
+    return json({ error: "Not found" }, 404, request);
+  } catch (error) { console.error(error); return json({ error: "Internal API error" }, 500, request); }
 };
