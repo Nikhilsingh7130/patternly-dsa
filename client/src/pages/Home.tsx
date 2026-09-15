@@ -23,6 +23,7 @@ import {
   Sun,
   Upload,
   FileSpreadsheet,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,6 +93,9 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [mutationPending, setMutationPending] = useState(false);
   const [addError, setAddError] = useState(false);
+  const [notesOpenId, setNotesOpenId] = useState<number | null>(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
   useEffect(() => { document.body.classList.toggle("dark-theme", darkMode); localStorage.setItem("patternly-theme", darkMode ? "dark" : "light"); }, [darkMode]);
   const loadCatalog = async () => {
     setLoading(true);
@@ -110,6 +114,8 @@ export default function Home() {
   const handleStatusChange = async (id: number, current: string) => { if (!user) { setAuthOpen(true); return; } const next = current === "Not started" ? "In progress" : current === "In progress" ? "Solved" : "Not started"; setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) }); await loadCatalog(); } finally { setMutationPending(false); } };
   const handleAdd = async (event: React.FormEvent) => { event.preventDefault(); if (!user) { setAuthOpen(true); return; } setMutationPending(true); setAddError(false); try { const response = await fetch("/api/questions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined }) }); if (!response.ok) throw new Error("Could not add question"); setForm(emptyForm); setIsAddOpen(false); setVisibleLimit(24); await loadCatalog(); } catch { setAddError(true); } finally { setMutationPending(false); } };
   const handleRemove = async (id: number) => { setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "DELETE", credentials: "include" }); await loadCatalog(); } finally { setMutationPending(false); } };
+  const openNotes = (question: any) => { if (!user) { setAuthOpen(true); return; } setNotesOpenId(notesOpenId === question.id ? null : question.id); setNotesDraft(question.notes ?? ""); };
+  const saveNotes = async (id: number) => { setNotesSaving(true); try { await fetch(`/api/questions/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: notesDraft }) }); await loadCatalog(); } finally { setNotesSaving(false); } };
   const handleAuth = async (event: React.FormEvent) => { event.preventDefault(); setAuthError(""); const response = await fetch(`/api/auth/${authMode}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(authForm) }); const data = await response.json(); if (!response.ok) { setAuthError(data.error || "Authentication failed"); return; } setUser(data.user); setAuthOpen(false); setAuthForm({ name: "", email: "", password: "" }); await loadCatalog(); };
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); setUser(null); setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); };
   const updateForm = (key: keyof AddForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
@@ -212,8 +218,9 @@ export default function Home() {
                   <div className="question-index">{String(question.leetcodeNumber ?? "—").padStart(3, "0")}</div>
                   <div className="question-main"><div className="question-title-line"><h3>{question.title}</h3>{question.url && <a href={question.url} target="_blank" rel="noreferrer" aria-label={`Open ${question.title} on LeetCode`}><ArrowUpRight size={14} /></a>}</div><div className="question-meta"><span>{question.section.replace(/^\w+\.\s*/, "")}</span><span className="meta-separator">/</span><span>{question.pattern.replace(/^Pattern \d+:\s*/, "")}</span>{question.source === "Manual" && <span className="manual-tag">Added by you</span>}</div></div>
                   <span className={`difficulty-pill ${difficultyMeta(question.difficulty)}`}>{question.difficulty}</span>
-                  <button className={`status-button ${meta.className}`} onClick={() => handleStatusChange(question.id, question.status)} disabled={mutationPending} title="Click to cycle status"><StatusIcon size={14} />{meta.label}</button>
+                  <button className={`status-button ${meta.className}`} onClick={() => handleStatusChange(question.id, question.status)} disabled={mutationPending} title="Click to cycle status"><StatusIcon size={14} />{meta.label}</button><button className={`note-button ${question.notes ? "has-note" : ""}`} onClick={() => openNotes(question)} aria-label={`Notes for ${question.title}`} title={question.notes ? "Edit notes" : "Add notes"}><FileText size={14} /></button>
                   {question.source === "Manual" && <button className="delete-button" onClick={() => void handleRemove(question.id)} disabled={mutationPending} aria-label={`Delete ${question.title}`}><Trash2 size={15} /></button>}
+                  {notesOpenId === question.id && <div className="question-notes-editor"><textarea value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} placeholder="Add your approach, edge cases, or revision notes…" maxLength={5000} rows={3} /><div><span>{notesDraft.length}/5000</span><button onClick={() => void saveNotes(question.id)} disabled={notesSaving}>{notesSaving ? "Saving…" : "Save notes"}</button></div></div>}
                 </article>;
               })}
             </div>

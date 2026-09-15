@@ -193,3 +193,34 @@ body.dark-theme .upload-sheet-button { color: #f0a08d; border-color: #80564a; }
 body.dark-theme .upload-sheet-button:hover { background: #2a2923; }
 body.dark-theme .file-picker { border-color: #44594a; background: #17221b; }
 body.dark-theme .file-picker span { color: #b8c8bb; }
+
+.note-button { display: grid; place-items: center; width: 29px; height: 29px; color: #95a29a; border: 1px solid #e1e8e0; border-radius: 7px; background: transparent; transition: .18s ease; }
+.note-button:hover, .note-button.has-note { color: #d4745b; border-color: #efcfc5; background: #fff7f4; }
+.question-notes-editor { grid-column: 2 / -1; display: grid; gap: 7px; padding: 10px 0 0; }
+.question-notes-editor textarea { width: 100%; resize: vertical; min-height: 65px; padding: 9px 10px; color: #526057; border: 1px solid #dfe7df; border-radius: 8px; outline: none; background: #fbfdfb; font-size: 11px; line-height: 1.5; }
+.question-notes-editor textarea:focus { border-color: #e4a08c; box-shadow: 0 0 0 3px rgba(212,116,91,.12); }
+.question-notes-editor > div { display: flex; align-items: center; justify-content: space-between; color: #a0aca2; font-size: 9px; }
+.question-notes-editor button { padding: 6px 10px; color: #fff; border: 0; border-radius: 6px; background: #d4745b; font-size: 10px; font-weight: 700; }
+body.dark-theme { color: #f2f5ee; background: #020b07; }
+body.dark-theme .app-shell { background: #020b07; }
+body.dark-theme .sidebar { background: #07140d; border-color: #213528; }
+body.dark-theme .topbar { background: #07140d; border-color: #213528; }
+body.dark-theme .main-content { background: #020b07; }
+body.dark-theme .brand-name, body.dark-theme .breadcrumb strong, body.dark-theme .side-nav-item, body.dark-theme .welcome-row h1, body.dark-theme .stat-card strong, body.dark-theme .panel-title, body.dark-theme .section-heading h2, body.dark-theme .question-title-line h3, body.dark-theme .auth-modal h2, body.dark-theme .add-modal h2 { color: #f4f7f0; }
+body.dark-theme .brand-caption, body.dark-theme .side-section-label, body.dark-theme .breadcrumb span, body.dark-theme .hero-copy, body.dark-theme .stat-card p, body.dark-theme .question-meta, body.dark-theme .page-footer, body.dark-theme .sync-label { color: #a0b3a4; }
+body.dark-theme .side-nav-item:hover, body.dark-theme .side-nav-item.active { background: #153522; color: #fff; }
+body.dark-theme .source-card, body.dark-theme .stat-card, body.dark-theme .insight-card, body.dark-theme .question-section { background: #0b1911; border-color: #354b3b; box-shadow: none; }
+body.dark-theme .source-card.active { border-color: #9d725e; background: #0e2116; }
+body.dark-theme .source-card p, body.dark-theme .question-section .section-heading-note { color: #e7eee5; }
+body.dark-theme .stat-icon.mint { background: #163d27; color: #89c59b; } body.dark-theme .stat-icon.peach { background: #4a1d0c; color: #f19b71; } body.dark-theme .stat-icon.yellow { background: #4a3a08; color: #e4c65c; } body.dark-theme .stat-icon.lilac { background: #2d3030; color: #d9ddd2; }
+body.dark-theme .question-row { border-color: #34483a; background: #0b1911; }
+body.dark-theme .question-row:hover { background: #102318; }
+body.dark-theme .question-index { color: #a8c6ac; background: #132e1d; }
+body.dark-theme .filter-toolbar, body.dark-theme .filter-toolbar select, body.dark-theme .search-wrap, body.dark-theme .search-wrap input { color: #b8c8bb; border-color: #405544; background: #07140d; }
+body.dark-theme .filter-toolbar select, body.dark-theme .search-wrap input { color: #f1f5ee; }
+body.dark-theme .icon-button, body.dark-theme .account-button, body.dark-theme .note-button { color: #d1ddd2; border-color: #405544; }
+body.dark-theme .icon-button:hover, body.dark-theme .account-button:hover, body.dark-theme .note-button:hover, body.dark-theme .note-button.has-note { background: #173522; border-color: #b87961; }
+body.dark-theme .question-notes-editor textarea { color: #edf5ee; border-color: #405544; background: #07140d; }
+body.dark-theme .question-notes-editor > div { color: #9db0a2; }
+body.dark-theme .add-modal, body.dark-theme .auth-modal { background: #0b1911; border-color: #405544; }
+@media (max-width: 760px) { .note-button { grid-column: 3; grid-row: 2; }.question-notes-editor { grid-column: 1 / -1; grid-row: 3; } }
