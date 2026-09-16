@@ -24,6 +24,8 @@ import {
   Upload,
   FileSpreadsheet,
   FileText,
+  Download,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +81,7 @@ export default function Home() {
   const [status, setStatus] = useState<Status>("all");
   const [difficulty, setDifficulty] = useState<Difficulty>("all");
   const [visibleLimit, setVisibleLimit] = useState(24);
+  const [hasMore, setHasMore] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadName, setUploadName] = useState("");
@@ -97,20 +100,21 @@ export default function Home() {
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   useEffect(() => { document.body.classList.toggle("dark-theme", darkMode); localStorage.setItem("patternly-theme", darkMode ? "dark" : "light"); }, [darkMode]);
-  const loadCatalog = async () => {
+  const loadCatalog = async (page = 1, append = false) => {
     setLoading(true);
-    try { const response = await fetch("/api/bootstrap", { credentials: "include" }); if (response.status === 401) { setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); return; } if (!response.ok) throw new Error("Catalog request failed"); const data = await response.json(); setUser(data.user); setQuestions(data.questions ?? []); setCustomSheets(data.customSheets ?? []); setStats(data.stats ?? stats); setFilters(data.filters ?? filters); } finally { setLoading(false); }
+    try { const params = new URLSearchParams({ page: String(page), limit: "24", search, section, pattern, difficulty, status }); if (sheetFilter) params.set("sheet", sheetFilter); const response = await fetch(`/api/bootstrap?${params.toString()}`, { credentials: "include" }); if (response.status === 401) { setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); return; } if (!response.ok) throw new Error("Catalog request failed"); const data = await response.json(); setUser(data.user); setQuestions((current) => append ? [...current, ...(data.questions ?? [])] : (data.questions ?? [])); setCustomSheets(data.customSheets ?? []); setStats(data.stats ?? stats); setFilters(data.filters ?? filters); setHasMore(Boolean(data.hasMore)); } finally { setLoading(false); }
   };
   useEffect(() => { void fetch("/api/auth/me", { credentials: "include" }).then((r) => r.json()).then((data) => { setUser(data.user ?? null); if (data.user) void loadCatalog(); else setLoading(false); }); }, []);
-  const activeQuestions = useMemo(() => questions.filter((question) => sheetFilter ? question.sheetName === sheetFilter : question.source === "Thita patterns sheet"), [questions, sheetFilter]);
-  const activeStats = useMemo(() => ({ total: activeQuestions.length, solved: activeQuestions.filter((q) => q.status === "Solved").length, inProgress: activeQuestions.filter((q) => q.status === "In progress").length, notStarted: activeQuestions.filter((q) => q.status === "Not started").length, easy: activeQuestions.filter((q) => q.difficulty === "Easy").length, medium: activeQuestions.filter((q) => q.difficulty === "Medium").length, hard: activeQuestions.filter((q) => q.difficulty === "Hard").length, sections: new Set(activeQuestions.map((q) => q.section)).size }), [activeQuestions]);
-  const activeFilters = useMemo(() => ({ sections: Array.from(new Set(activeQuestions.map((q) => q.section))), patterns: Array.from(new Set(activeQuestions.map((q) => q.pattern))) }), [activeQuestions]);
-  const filteredQuestions = useMemo(() => activeQuestions.filter((question) => { const needle = search.trim().toLowerCase(); const matchesSearch = !needle || [question.title, question.pattern, question.section].some((value) => String(value).toLowerCase().includes(needle)); return matchesSearch && (section === "all" || question.section === section) && (pattern === "all" || question.pattern === pattern) && (difficulty === "all" || question.difficulty === difficulty) && (status === "all" || question.status === status); }), [activeQuestions, search, section, pattern, difficulty, status]);
-  const visibleQuestions = filteredQuestions.slice(0, visibleLimit);
+  const activeQuestions = questions;
+  const activeStats = stats;
+  const activeFilters = filters;
+  const filteredQuestions = questions;
+  const visibleQuestions = questions;
   const completion = activeStats.total ? Math.round((activeStats.solved / activeStats.total) * 100) : 0;
   const activeFilterCount = [section !== "all", pattern !== "all", difficulty !== "all", status !== "all"].filter(Boolean).length;
   const activeSheetName = sheetFilter ?? "Thita patterns sheet";
   const selectSheet = (name: string | null) => { setSheetFilter(name); setSearch(""); setSection("all"); setPattern("all"); setDifficulty("all"); setStatus("all"); setVisibleLimit(24); };
+  useEffect(() => { if (user) void loadCatalog(1, false); }, [user?.id, sheetFilter, search, section, pattern, difficulty, status]);
   const handleStatusChange = async (id: number, next: string) => { if (!user) { setAuthOpen(true); return; } setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) }); await loadCatalog(); } finally { setMutationPending(false); } };
   const handleAdd = async (event: React.FormEvent) => { event.preventDefault(); if (!user) { setAuthOpen(true); return; } setMutationPending(true); setAddError(false); try { const response = await fetch("/api/questions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leetcodeNumber: form.leetcodeNumber ? Number(form.leetcodeNumber) : undefined }) }); if (!response.ok) throw new Error("Could not add question"); setForm(emptyForm); setIsAddOpen(false); setVisibleLimit(24); await loadCatalog(); } catch { setAddError(true); } finally { setMutationPending(false); } };
   const handleRemove = async (id: number) => { setMutationPending(true); try { await fetch(`/api/questions/${id}`, { method: "DELETE", credentials: "include" }); await loadCatalog(); } finally { setMutationPending(false); } };
@@ -120,6 +124,8 @@ export default function Home() {
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); setUser(null); setQuestions([]); setStats({ total: 0, solved: 0, inProgress: 0, notStarted: 0, easy: 0, medium: 0, hard: 0, sections: 0 }); };
   const updateForm = (key: keyof AddForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const handleUpload = async (event: React.FormEvent) => { event.preventDefault(); if (!uploadFile || !uploadName.trim()) { setUploadError("Choose a CSV file and give it a name."); return; } setUploadPending(true); setUploadError(""); try { const csv = await uploadFile.text(); const response = await fetch("/api/sheets/import", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadName, csv }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Import failed"); setUploadOpen(false); setUploadName(""); setUploadFile(null); await loadCatalog(); } catch (error) { setUploadError(error instanceof Error ? error.message : "Could not import this sheet."); } finally { setUploadPending(false); } };
+  const renameSheet = async (sheet: { id: number; name: string }) => { const name = window.prompt("New sheet name", sheet.name)?.trim(); if (!name || name === sheet.name) return; await fetch(`/api/sheets/${sheet.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); if (sheetFilter === sheet.name) setSheetFilter(name); await loadCatalog(); };
+  const deleteSheet = async (sheet: { id: number; name: string }) => { if (!window.confirm(`Delete “${sheet.name}” and all its questions? This cannot be undone.`)) return; await fetch(`/api/sheets/${sheet.id}`, { method: "DELETE", credentials: "include" }); if (sheetFilter === sheet.name) selectSheet(null); else await loadCatalog(); };
   return (
     <div className="app-shell min-h-screen">
       <aside className="sidebar">
@@ -144,7 +150,7 @@ export default function Home() {
           <div><p>Thita patterns sheet</p><span>{user ? "Shared starter catalog" : "Sign in to save progress"}</span></div>
           <a href="https://docs.google.com/spreadsheets/d/1EEYzyD_483B-7CmWxsJB_zycdv4Y5dxnzcoEQtaIfuk/edit?gid=329533698#gid=329533698" target="_blank" rel="noreferrer" aria-label="Open source sheet"><ArrowUpRight size={15} /></a>
         </button>
-        {customSheets.map((sheet) => <button className={`custom-sheet-card ${sheetFilter === sheet.name ? "active" : ""}`} key={sheet.id} onClick={() => selectSheet(sheet.name)}><FileSpreadsheet size={15} /><span><strong>{sheet.name}</strong><small>{sheet.questionCount} questions · private</small></span></button>)}
+        {customSheets.map((sheet) => <div className={`custom-sheet-card-row ${sheetFilter === sheet.name ? "active" : ""}`} key={sheet.id}><button className="custom-sheet-card" onClick={() => selectSheet(sheet.name)}><FileSpreadsheet size={15} /><span><strong>{sheet.name}</strong><small>{sheet.questionCount} questions · private</small></span></button><div className="sheet-actions"><button onClick={() => void renameSheet(sheet)} aria-label={`Rename ${sheet.name}`} title="Rename sheet"><Pencil size={12} /></button><a href={`/api/sheets/${sheet.id}/export`} aria-label={`Export ${sheet.name}`} title="Export CSV"><Download size={12} /></a><button onClick={() => void deleteSheet(sheet)} aria-label={`Delete ${sheet.name}`} title="Delete sheet"><Trash2 size={12} /></button></div></div>)}
         <button className="upload-sheet-button" onClick={() => user ? setUploadOpen(true) : setAuthOpen(true)}><Upload size={14} /> Upload custom CSV</button>
 
         <div className="sidebar-spacer" />
@@ -224,7 +230,7 @@ export default function Home() {
                 </article>;
               })}
             </div>
-            {!loading && visibleQuestions.length < filteredQuestions.length && <button className="load-more" onClick={() => setVisibleLimit((limit) => limit + 24)}>Load 24 more questions <ChevronDown size={15} /></button>}
+            {!loading && hasMore && <button className="load-more" onClick={() => void loadCatalog(Math.floor(questions.length / 24) + 1, true)}>Load 24 more questions <ChevronDown size={15} /></button>}
           </section>
 
           <footer className="page-footer"><span>Patternly · Built for deliberate practice</span><span><a href="https://thita.ai/dsa-patterns-sheet" target="_blank" rel="noreferrer">View original sheet <ArrowUpRight size={13} /></a></span></footer>
