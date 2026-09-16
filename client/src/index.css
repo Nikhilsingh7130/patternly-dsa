@@ -224,3 +224,16 @@ body.dark-theme .question-notes-editor textarea { color: #edf5ee; border-color: 
 body.dark-theme .question-notes-editor > div { color: #9db0a2; }
 body.dark-theme .add-modal, body.dark-theme .auth-modal { background: #0b1911; border-color: #405544; }
 @media (max-width: 760px) { .note-button { grid-column: 3; grid-row: 2; }.question-notes-editor { grid-column: 1 / -1; grid-row: 3; } }
+
+.status-select-wrap { display: inline-flex; align-items: center; gap: 5px; min-width: 116px; height: 29px; padding: 0 7px; border: 1px solid #dfe7df; border-radius: 7px; background: #fbfdfb; }
+.status-select-wrap.status-solved { color: #cf6953; border-color: #efcfc5; background: #fff7f4; }
+.status-select-wrap.status-progress { color: #a48722; border-color: #eadca9; background: #fffdf1; }
+.status-select-wrap.status-idle { color: #8b9790; }
+.status-select { min-width: 82px; color: inherit; border: 0; outline: none; background: transparent; font-size: 10px; font-weight: 700; cursor: pointer; }
+.status-select option { color: #526057; background: #fff; }
+body.dark-theme .status-select-wrap { border-color: #405544; background: #07140d; }
+body.dark-theme .status-select-wrap.status-solved { color: #f19b71; border-color: #8e4e39; background: #26130c; }
+body.dark-theme .status-select-wrap.status-progress { color: #e4c65c; border-color: #77631e; background: #211c08; }
+body.dark-theme .status-select-wrap.status-idle { color: #aabaae; }
+body.dark-theme .status-select option { color: #edf5ee; background: #0b1911; }
+@media (max-width: 760px) { .status-select-wrap { grid-column: 3; grid-row: 1; min-width: 24px; width: 24px; padding: 0; justify-content: center; border: 0; background: transparent; }.status-select-wrap .status-select { position: absolute; width: 24px; height: 28px; opacity: 0; }.status-select-wrap svg { pointer-events: none; } }
